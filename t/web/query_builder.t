@@ -411,4 +411,51 @@ diag "make sure active and inactive statuses generate the correct query";
     is getQueryFromForm( $agent ), "Status = '__Inactive__'", "inactive status generated the correct query";
 }
 
+diag "test null values";
+{
+    my $cf = RT::Test->load_or_create_custom_field(
+        Name  => 'foo',
+        Type  => 'FreeformSingle',
+        Queue => 0,
+    );
+
+    RT::Test->create_tickets(
+        { Queue   => 'General' },
+        { Subject => 'ticket bar', 'CustomField-' . $cf->id => 'bar' },
+        { Subject => 'ticket baz', 'CustomField-' . $cf->id => 'baz' },
+        { Subject => 'ticket null' },
+    );
+
+    my ( $baseurl, $m ) = RT::Test->started_ok;
+    ok( $m->login, 'logged in' );
+
+    $m->get_ok( '/Search/Build.html' );
+    $m->submit_form(
+        form_name => 'BuildQuery',
+        fields    => { 'CF.{foo}Op' => '=', 'ValueOfCF.{foo}' => 'NULL', },
+        button    => 'DoSearch',
+    );
+
+    $m->title_is( 'Found 2 tickets', 'found 2 tickets with CF.{foo} IS NULL' );
+    # the other ticket was created before the block
+    $m->content_contains( 'ticket null', 'has ticket null' );
+    $m->follow_link_ok( { text => 'Advanced' } );
+    $m->text_lacks( q[CF.{foo} = 'NULL'] );
+    $m->text_contains( 'CF.{foo} IS NULL', q["= 'NULL'" is converted to "IS NULL"] );
+
+    $m->get_ok( '/Search/Build.html?NewQuery=1' );
+    $m->submit_form(
+        form_name => 'BuildQuery',
+        fields    => { 'CF.{foo}Op' => '!=', 'ValueOfCF.{foo}' => 'NULL', },
+        button    => 'DoSearch',
+    );
+
+    $m->title_is( 'Found 2 tickets', 'found 2 ticket with CF.{foo} IS NOT NULL' );
+    $m->content_contains( 'ticket bar', 'has ticket bar' );
+    $m->content_contains( 'ticket baz', 'has ticket baz' );
+    $m->follow_link_ok( { text => 'Advanced' } );
+    $m->text_lacks( q[CF.{foo} != 'NULL'] );
+    $m->text_contains( 'CF.{foo} IS NOT NULL', q["!= 'NULL'" is converted to "IS NOT NULL"] );
+}
+
 done_testing;
